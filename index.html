@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101820">
+  <title>Who's That Pokémon?</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101820; --panel:#182631; --panel2:#213541; --ink:#f4f7f8; --muted:#aab8bf; --yellow:#ffcb05; --blue:#2c75ba; --red:#fa5d60; --green:#66d7a3; }
+    * { box-sizing:border-box }
+    body { margin:0; min-height:100vh; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color:var(--ink); background:radial-gradient(ellipse at 50% -15%,#294858 0,#101820 56%); display:grid; place-items:center; padding:24px; }
+    .shell { width:min(100%,560px); }
+    header { display:flex; justify-content:space-between; align-items:center; margin:0 0 20px; }
+    .brand { font-weight:900; letter-spacing:.03em; font-size:19px; }
+    .brand span { color:var(--yellow); }
+    .best { color:var(--muted); font-size:13px; }
+    .best b { color:var(--yellow); margin-left:5px; }
+    .card { background:linear-gradient(150deg,rgba(30,48,60,.97),rgba(20,34,44,.98)); border:1px solid #344c59; border-radius:26px; padding:26px; box-shadow:0 24px 70px #0005; }
+    .topline { display:flex; justify-content:space-between; align-items:center; color:var(--muted); font-size:13px; font-weight:700; }
+    .round { text-transform:uppercase; letter-spacing:.12em; }
+    .points { color:var(--yellow); }
+    .image-stage { height:300px; margin:18px 0 20px; border-radius:20px; background:radial-gradient(ellipse,#e8f2f2 0%,#cbdde0 48%,#8ca6ae 100%); display:grid; place-items:center; overflow:hidden; position:relative; }
+    .image-stage::after { content:""; position:absolute; width:190px; height:24px; border-radius:50%; background:#334c5624; bottom:28px; filter:blur(10px); }
+    #mon { width:min(74%,250px); height:min(74%,250px); object-fit:contain; z-index:1; filter:drop-shadow(0 12px 12px #24384438); transition:filter .3s ease, transform .3s ease; }
+    #mon.revealed { filter:drop-shadow(0 12px 12px #24384438); transform:scale(1.05); }
+    .loading { color:#304650; font-weight:700; position:absolute; z-index:2; }
+    h1 { font-size:22px; margin:0 0 6px; text-align:center; }
+    .hint { text-align:center; color:var(--muted); font-size:14px; margin:0 0 17px; }
+    form { display:flex; gap:10px; }
+    input { flex:1; min-width:0; border:1px solid #425a66; background:#101c24; color:var(--ink); border-radius:13px; padding:14px 15px; font:inherit; font-size:16px; outline:none; }
+    input:focus { border-color:var(--yellow); box-shadow:0 0 0 3px #ffcb0525; }
+    button { border:0; border-radius:13px; padding:0 20px; min-height:50px; color:#14212a; background:var(--yellow); font:inherit; font-weight:850; cursor:pointer; transition:transform .12s, filter .12s; }
+    button:hover { filter:brightness(1.06); transform:translateY(-1px); }
+    button:active { transform:translateY(0); }
+    button:disabled { opacity:.48; cursor:default; transform:none; }
+    .message { min-height:25px; text-align:center; font-weight:750; margin:14px 0 0; }
+    .message.good { color:var(--green); }
+    .message.bad { color:#ff8d8f; }
+    .actions { display:flex; justify-content:center; margin-top:12px; }
+    .secondary { background:var(--panel2); color:var(--ink); min-height:44px; }
+    .hidden { display:none!important; }
+    .error { color:#ffc1c1; font-size:14px; line-height:1.5; text-align:center; padding:15px; }
+    footer { text-align:center; font-size:11px; line-height:1.6; color:#82949e; margin:18px 12px 0; }
+    footer a { color:#aebdc4; }
+    @media(max-width:480px) { body{padding:16px}.card{padding:18px}.image-stage{height:260px}form{flex-direction:column}button{width:100%}header{margin-bottom:14px} }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header><div class="brand">WHO'S THAT <span>POKÉMON?</span></div><div class="best">BEST <b id="best">0</b></div></header>
+    <section class="card" aria-live="polite">
+      <div class="topline"><span class="round" id="round">Loading</span><span class="points" id="points">— points</span></div>
+      <div class="image-stage"><span class="loading" id="loading">Loading Pokémon…</span><img id="mon" alt="Mystery Pokémon silhouette"></div>
+      <h1 id="prompt">Getting your Pokédex ready</h1>
+      <p class="hint" id="hint">The more you get right, the more each answer is worth.</p>
+      <form id="answer-form"><input id="answer" type="text" placeholder="Type a Pokémon name" autocomplete="off" autocapitalize="words" disabled><button id="submit" type="submit" disabled>Guess</button></form>
+      <p class="message" id="message"></p>
+      <div class="actions"><button class="secondary hidden" id="continue" type="button">Next Pokémon →</button><button class="secondary hidden" id="restart" type="button">Play again</button></div>
+      <div class="error hidden" id="error"></div>
+    </section>
+    <footer>Pokémon names referenced from the <a href="https://pokemon.fandom.com/wiki/List_of_Pok%C3%A9mon" target="_blank" rel="noreferrer">Pokémon Wiki list</a>. Names and sprites load from <a href="https://pokeapi.co/" target="_blank" rel="noreferrer">PokéAPI</a>.</footer>
+  </main>
+<script>
+(() => {
+  const API = 'https://pokeapi.co/api/v2/pokemon?limit=1025';
+  const $ = id => document.getElementById(id);
+  const img = $('mon'), loading = $('loading'), form = $('answer-form'), input = $('answer');
+  const GENERATIONS = [[1,151],[152,251],[252,386],[387,493],[494,649],[650,721],[722,809],[810,905],[906,1025]];
+  let roster = [], generationQueues = [], generationIndex = 0, questionsInGeneration = 0, score = 0, answered = false;
+  $('best').textContent = localStorage.getItem('pokemon-quiz-best') || '0';
+  const normalize = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'f').replace(/♂/g,'m').replace(/[^a-z0-9]/gi,'').toLowerCase();
+  const nameHint = name => {
+    const chars = Array.from(name);
+    return chars.map((char, i) => i === 0 || i === chars.length - 1 || !/[a-z0-9]/i.test(char) ? char : '•').join('');
+  };
+  const shuffle = a => { for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; };
+  function closeEnough(guess, answer) {
+    const a = normalize(guess), b = normalize(answer);
+    if (a === b) return true;
+    const limit = b.length >= 10 ? 2 : 1;
+    if (!a || Math.abs(a.length - b.length) > limit) return false;
+    let row = Array.from({length:b.length + 1}, (_,i) => i);
+    for (let i=1; i<=a.length; i++) {
+      const next = [i];
+      for (let j=1; j<=b.length; j++) {
+        next[j] = Math.min(next[j-1] + 1, row[j] + 1, row[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+      }
+      row = next;
+    }
+    return row[b.length] <= limit;
+  }
+  function resetGenerationCycle() {
+    generationQueues = GENERATIONS.map(([first,last]) => shuffle(roster.filter(p => p.id >= first && p.id <= last)));
+    generationIndex = 0;
+    questionsInGeneration = 0;
+  }
+  function showPokemon() {
+    answered = false;
+    let group = generationQueues[generationIndex];
+    if (!group.length) {
+      const [first,last] = GENERATIONS[generationIndex];
+      group = shuffle(roster.filter(p => p.id >= first && p.id <= last));
+      generationQueues[generationIndex] = group;
+    }
+    const p = group.shift();
+    p.generation = generationIndex + 1;
+    p.generationQuestion = questionsInGeneration + 1;
+    questionsInGeneration++;
+    if (questionsInGeneration === 5) {
+      questionsInGeneration = 0;
+      generationIndex = (generationIndex + 1) % GENERATIONS.length;
+    }
+    window.currentPokemon = p;
+    $('round').textContent = `Round ${score + 1} · Gen ${p.generation} (${p.generationQuestion}/5)`;
+    $('points').textContent = `${score + 1} ${score === 0 ? 'point' : 'points'} on the line`;
+    $('prompt').textContent = 'Name this Pokémon';
+    $('hint').textContent = `Hint: ${nameHint(p.name)} · A wrong answer ends your run.`;
+    $('message').textContent = '';
+    $('message').className = 'message';
+    $('continue').classList.add('hidden');
+    $('restart').classList.add('hidden');
+    $('error').classList.add('hidden');
+    input.value = ''; input.disabled = false; $('submit').disabled = false;
+    img.classList.remove('revealed'); img.alt = 'Mystery Pokémon silhouette'; loading.classList.remove('hidden');
+    const art = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`;
+    img.onload = () => loading.classList.add('hidden');
+    img.onerror = () => {
+      img.onerror = () => { loading.textContent = 'Artwork unavailable'; loading.classList.remove('hidden'); };
+      img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${p.id}.png`;
+    };
+    img.src = art;
+    input.focus();
+  }
+  function finish(message) {
+    $('round').textContent = 'Game over'; $('points').textContent = `${score} ${score === 1 ? 'point' : 'points'}`;
+    $('prompt').textContent = 'Run complete'; $('hint').textContent = message;
+    input.disabled = true; $('submit').disabled = true;
+    $('continue').classList.add('hidden'); $('restart').classList.remove('hidden');
+  }
+  form.addEventListener('submit', e => {
+    e.preventDefault(); if(answered || !input.value.trim()) return;
+    const p = window.currentPokemon;
+    if(closeEnough(input.value, p.name)) {
+      answered = true; score += 1;
+      const best = Math.max(score, Number(localStorage.getItem('pokemon-quiz-best') || 0));
+      localStorage.setItem('pokemon-quiz-best', String(best)); $('best').textContent = best;
+      img.classList.add('revealed'); img.alt = p.name;
+      $('round').textContent = 'Correct!'; $('points').textContent = `+${score} ${score === 1 ? 'point' : 'points'}`;
+      $('prompt').textContent = p.name; $('hint').textContent = 'Nice one. Keep your streak going!';
+      $('message').textContent = `You earned ${score} ${score === 1 ? 'point' : 'points'}.`;
+      $('message').className = 'message good'; input.disabled = true; $('submit').disabled = true;
+      $('continue').classList.remove('hidden'); $('continue').focus();
+    } else {
+      answered = true; img.classList.add('revealed'); img.alt = p.name;
+      $('round').textContent = 'Game over'; $('points').textContent = `${score} ${score === 1 ? 'point' : 'points'}`;
+      $('prompt').textContent = `It was ${p.name}`; $('hint').textContent = 'That guess ended your run. Try again and beat your score.';
+      $('message').textContent = 'Not quite!'; $('message').className = 'message bad';
+      input.disabled = true; $('submit').disabled = true; $('restart').classList.remove('hidden'); $('restart').focus();
+    }
+  });
+  $('continue').addEventListener('click', showPokemon);
+  $('restart').addEventListener('click', () => { score = 0; resetGenerationCycle(); showPokemon(); });
+  fetch(API).then(r => { if(!r.ok) throw new Error('PokéAPI could not be reached.'); return r.json(); })
+    .then(data => {
+      roster = data.results.map((x,i) => ({id:i+1,name:x.name.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}));
+      resetGenerationCycle();
+      showPokemon();
+    }).catch(() => {
+      loading.classList.add('hidden'); $('prompt').textContent = 'Could not load the Pokédex';
+      $('hint').textContent = 'Check your internet connection, then reload this page.';
+      $('error').textContent = 'This game needs internet access to fetch the Pokémon roster and artwork.'; $('error').classList.remove('hidden');
+    });
+})();
+</script>
+</body>
+</html>
